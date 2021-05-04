@@ -6,12 +6,18 @@ package main
 */
 import "C"
 import (
+	"flag"
 	"fmt"
 	"log"
 	"unsafe"
 )
 
-func seq_init() (seq *C.snd_seq_t) {
+const CLIENT_NAME = "test seq"
+
+var listPorts = flag.Bool("list", false, "")
+var portName = flag.String("port", "", "")
+
+func newSeq() (seq *C.snd_seq_t) {
 	cstr := C.CString("default")
 	defer C.free(unsafe.Pointer(cstr))
 
@@ -20,7 +26,7 @@ func seq_init() (seq *C.snd_seq_t) {
 		log.Fatalln("Couldn't open sequencer")
 	}
 
-	name := C.CString("test")
+	name := C.CString(CLIENT_NAME)
 	defer C.free(unsafe.Pointer(name))
 
 	cerr = C.snd_seq_set_client_name(seq, name)
@@ -31,11 +37,11 @@ func seq_init() (seq *C.snd_seq_t) {
 	return
 }
 
-func seq_deinit(seq *C.snd_seq_t) {
+func (seq *C.snd_seq_t) free() {
 	C.snd_seq_close(seq)
 }
 
-func print_ports(seq *C.snd_seq_t) {
+func (seq *C.snd_seq_t) printPorts() {
 	var cinfo *C.snd_seq_client_info_t
 	var pinfo *C.snd_seq_port_info_t
 
@@ -51,6 +57,7 @@ func print_ports(seq *C.snd_seq_t) {
 	}
 	defer C.snd_seq_port_info_free(pinfo)
 
+	fmt.Println(" Port   Client name                       Port name")
 	C.snd_seq_client_info_set_client(cinfo, -1)
 	for C.snd_seq_query_next_client(seq, cinfo) >= 0 {
 		client := C.snd_seq_client_info_get_client(cinfo)
@@ -68,9 +75,87 @@ func print_ports(seq *C.snd_seq_t) {
 	}
 }
 
-func main() {
-	seq := seq_init()
-	defer seq_deinit(seq)
+func (seq *C.snd_seq_t) initPort() (port C.int) {
+	name := C.CString(CLIENT_NAME)
+	defer C.free(unsafe.Pointer(name))
 
-	print_ports(seq)
+	port = C.snd_seq_create_simple_port(seq, name,
+		C.SND_SEQ_PORT_CAP_WRITE|C.SND_SEQ_PORT_CAP_SUBS_WRITE,
+		C.SND_SEQ_PORT_TYPE_MIDI_GENERIC|C.SND_SEQ_PORT_TYPE_APPLICATION,
+	)
+	if port < 0 {
+		log.Fatalln("Couldn't create port")
+	}
+
+	return
+}
+
+func (seq *C.snd_seq_t) deinitPort(port C.int) {
+	cerr := C.snd_seq_delete_simple_port(seq, port)
+	if cerr < 0 {
+		log.Fatalln("Couldn't delete port")
+	}
+}
+
+func (seq *C.snd_seq_t) parsePort(s string) (addr C.snd_seq_addr_t) {
+	cstr := C.CString(s)
+	defer C.free(unsafe.Pointer(cstr))
+
+	cerr := C.snd_seq_parse_address(seq, &addr, cstr)
+	if cerr < 0 {
+		log.Fatalf("Invalid port %v", s)
+	}
+
+	return
+}
+
+func (seq *C.snd_seq_t) connectPort(addr C.snd_seq_addr_t) {
+	cerr := C.snd_seq_connect_from(seq, 0, C.int(addr.client), C.int(addr.port))
+	if cerr < 0 {
+		log.Fatalf("Couldn't connect from port %v:%v\n",
+			addr.client, addr.port)
+	}
+}
+
+func (seq *C.snd_seq_t) disconnectPort(addr C.snd_seq_addr_t) {
+	cerr := C.snd_seq_disconnect_from(seq, 0,
+		C.int(addr.client), C.int(addr.port))
+	if cerr < 0 {
+		log.Fatalf("Couldn't disconnect from port %v:%v\n",
+			addr.client, addr.port)
+	}
+}
+
+func (seq *C.snd_seq_t) recieveEvents(c chan<- C.snd_seq_event_t) {
+	var event *C.snd_seq_event_t
+	for C.snd_seq_event_input(seq, &event) >= 0 {
+		c <- *event
+	}
+	close(c)
+}
+
+func main() {
+	flag.Parse()
+
+	seq := newSeq()
+	defer seq.free()
+
+	if *listPorts {
+		seq.printPorts()
+	}
+
+	port := seq.initPort()
+	defer seq.deinitPort(port)
+
+	portConnect := seq.parsePort(*portName)
+
+	seq.connectPort(portConnect)
+	defer seq.disconnectPort(portConnect)
+
+	c := make(chan C.snd_seq_event_t)
+	go seq.recieveEvents(c)
+
+	for e := range c {
+		fmt.Println(e)
+	}
 }
