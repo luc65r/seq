@@ -17,7 +17,7 @@ func seq_init() (seq *C.snd_seq_t) {
 
 	cerr := C.snd_seq_open(&seq, cstr, C.SND_SEQ_OPEN_DUPLEX, 0)
 	if cerr < 0 {
-		log.Fatal("Couldn't open sequencer")
+		log.Fatalln("Couldn't open sequencer")
 	}
 
 	name := C.CString("test")
@@ -25,7 +25,7 @@ func seq_init() (seq *C.snd_seq_t) {
 
 	cerr = C.snd_seq_set_client_name(seq, name)
 	if cerr < 0 {
-		log.Fatal("Couldn't set client name")
+		log.Fatalln("Couldn't set client name")
 	}
 
 	return
@@ -41,13 +41,13 @@ func print_ports(seq *C.snd_seq_t) {
 
 	cerr := C.snd_seq_client_info_malloc(&cinfo)
 	if cerr < 0 {
-		log.Fatal("Couldn't allocate memory for client info")
+		log.Fatalln("Couldn't allocate memory for client info")
 	}
 	defer C.snd_seq_client_info_free(cinfo)
 
 	cerr = C.snd_seq_port_info_malloc(&pinfo)
 	if cerr < 0 {
-		log.Fatal("Couldn't allocate memory for port info")
+		log.Fatalln("Couldn't allocate memory for port info")
 	}
 	defer C.snd_seq_port_info_free(pinfo)
 
